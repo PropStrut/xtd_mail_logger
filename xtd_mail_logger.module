@@ -1,0 +1,247 @@
+<?php
+
+/**
+ * @file
+ * XTD Mail Logger module - Logs successful and failed emails.
+ */
+
+/**
+ * Implements hook_permission().
+ */
+function xtd_mail_logger_permission() {
+  return array(
+    'administer xtd mail logger' => array(
+      'title' => t('Administer XTD Mail Logger'),
+      'description' => t('Configure XTD Mail Logger settings.'),
+    ),
+    'view xtd mail logs' => array(
+      'title' => t('View XTD Mail Logs'),
+      'description' => t('View XTD Mail Logger logs.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function xtd_mail_logger_menu() {
+  $items = array();
+
+  $items['admin/config/development/xtd-mail-logger'] = array(
+    'title' => 'XTD Mail Logger',
+    'description' => 'Configure XTD Mail Logger settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('xtd_mail_logger_admin_form'),
+    'access arguments' => array('administer xtd mail logger'),
+    'file' => 'xtd_mail_logger.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/reports/xtd-mail-logs'] = array(
+    'title' => 'XTD Mail Logs',
+    'description' => 'View XTD Mail Logger logs.',
+    'page callback' => 'xtd_mail_logger_logs_page',
+    'access arguments' => array('view xtd mail logs'),
+    'file' => 'xtd_mail_logger.pages.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['admin/reports/xtd-mail-logs/database'] = array(
+    'title' => 'Database Logs',
+    'page callback' => 'xtd_mail_logger_database_logs_page',
+    'access arguments' => array('view xtd mail logs'),
+    'file' => 'xtd_mail_logger.pages.inc',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 0,
+  );
+
+  $items['admin/reports/xtd-mail-logs/file'] = array(
+    'title' => 'File Logs',
+    'page callback' => 'xtd_mail_logger_file_logs_page',
+    'access arguments' => array('view xtd mail logs'),
+    'file' => 'xtd_mail_logger.pages.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 1,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_mail_alter().
+ */
+function xtd_mail_logger_mail_alter(&$message) {
+  // We'll capture the mail sending in hook_drupal_mail_send_alter instead
+  // This hook just marks that we want to log this message
+  $message['#xtd_mail_logger_enabled'] = TRUE;
+}
+
+/**
+ * Implements hook_drupal_mail_send_alter().
+ */
+function xtd_mail_logger_drupal_mail_send_alter(&$mailkey, &$message, $params) {
+  // This will be called after the mail is sent, but we need to capture the result differently
+}
+
+/**
+ * Custom mail system class that wraps the default system.
+ */
+class XTDMailLoggerSystem extends DefaultMailSystem {
+  
+  public function mail(array $message) {
+    // Send using parent class
+    $result = parent::mail($message);
+    
+    // Log the result
+    xtd_mail_logger_log_email($message, $result);
+    
+    return $result;
+  }
+}
+
+/**
+ * Implements hook_init().
+ */
+function xtd_mail_logger_init() {
+  // Override the default mail system to use our logger
+  $mail_system = variable_get('mail_system', array('default-system' => 'DefaultMailSystem'));
+  
+  // Only override if not already set to avoid conflicts
+  if (!isset($mail_system['default-system']) || $mail_system['default-system'] == 'DefaultMailSystem') {
+    $mail_system['default-system'] = 'XTDMailLoggerSystem';
+    variable_set('mail_system', $mail_system);
+  }
+}
+
+/**
+ * Log email to database and/or file.
+ */
+function xtd_mail_logger_log_email($message, $result) {
+  $log_to_database = variable_get('xtd_mail_logger_database', TRUE);
+  $log_to_file = variable_get('xtd_mail_logger_file', TRUE);
+  
+  if (!$log_to_database && !$log_to_file) {
+    return;
+  }
+  
+  $status = $result ? 'PASS' : 'FAIL';
+  $failure_reason = '';
+  
+  if (!$result) {
+    // Try to get failure reason from error log or last error
+    $error = error_get_last();
+    if ($error && strpos($error['message'], 'mail') !== FALSE) {
+      $failure_reason = $error['message'];
+    } else {
+      $failure_reason = 'Mail send failed - reason unknown';
+    }
+  }
+  
+  $log_data = array(
+    'timestamp' => REQUEST_TIME,
+    'status' => $status,
+    'failure_reason' => $failure_reason,
+    'subject' => isset($message['subject']) ? $message['subject'] : '',
+    'from_email' => isset($message['from']) ? $message['from'] : '',
+    'to_email' => isset($message['to']) ? $message['to'] : '',
+  );
+  
+  // Log to database
+  if ($log_to_database) {
+    db_insert('xtd_mail_logger')
+      ->fields($log_data)
+      ->execute();
+  }
+  
+  // Log to file
+  if ($log_to_file) {
+    xtd_mail_logger_write_to_file($log_data);
+  }
+}
+
+/**
+ * Write log entry to file.
+ */
+function xtd_mail_logger_write_to_file($log_data) {
+  $log_dir = 'sites/default/files';
+  $log_file = $log_dir . '/xtd_email_logger.log';
+  
+  // Ensure directory exists
+  if (!file_exists($log_dir)) {
+    mkdir($log_dir, 0755, TRUE);
+  }
+  
+  $timestamp = date('Y-m-d H:i:s', $log_data['timestamp']);
+  $log_line = sprintf(
+    "[%s] %s | Subject: %s | From: %s | To: %s | Reason: %s\n",
+    $timestamp,
+    $log_data['status'],
+    $log_data['subject'],
+    $log_data['from_email'],
+    $log_data['to_email'],
+    $log_data['failure_reason']
+  );
+  
+  file_put_contents($log_file, $log_line, FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * Implements hook_cron().
+ */
+function xtd_mail_logger_cron() {
+  // Clean up old database logs (older than 3 days)
+  $cutoff = REQUEST_TIME - (7 * 24 * 60 * 60);
+  
+  if (variable_get('xtd_mail_logger_database', TRUE)) {
+    db_delete('xtd_mail_logger')
+      ->condition('timestamp', $cutoff, '<')
+      ->execute();
+  }
+  
+  // Clean up old file logs
+  if (variable_get('xtd_mail_logger_file', TRUE)) {
+    xtd_mail_logger_cleanup_file_logs();
+  }
+}
+
+/**
+ * Clean up old file logs.
+ */
+function xtd_mail_logger_cleanup_file_logs() {
+  $log_file = 'sites/default/files/xtd_email_logger.log';
+  
+  if (!file_exists($log_file)) {
+    return;
+  }
+  
+  $cutoff = REQUEST_TIME - (7 * 24 * 60 * 60);
+  $lines = file($log_file, FILE_IGNORE_NEW_LINES);
+  $new_lines = array();
+  
+  foreach ($lines as $line) {
+    if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $line, $matches)) {
+      $log_timestamp = strtotime($matches[1]);
+      if ($log_timestamp >= $cutoff) {
+        $new_lines[] = $line;
+      }
+    }
+  }
+  
+  file_put_contents($log_file, implode("\n", $new_lines) . "\n");
+}
+
+/**
+ * Clear all logs.
+ */
+function xtd_mail_logger_clear_all_logs() {
+  // Clear database logs
+  db_truncate('xtd_mail_logger')->execute();
+  
+  // Clear file logs
+  $log_file = 'sites/default/files/xtd_email_logger.log';
+  if (file_exists($log_file)) {
+    unlink($log_file);
+  }
+  
+  drupal_set_message(t('All XTD Mail Logger logs have been cleared.'));
+}

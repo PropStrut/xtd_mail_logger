@@ -1,0 +1,12 @@
+name = XTD Mail Logger
+description = Logs successful and failed emails to database and files with configurable options.
+package = Development
+core = 7.x
+version = 7.x-1.0
+
+files[] = xtd_mail_logger.module
+files[] = xtd_mail_logger.install
+files[] = xtd_mail_logger.admin.inc
+files[] = xtd_mail_logger.pages.inc
+
+configure = admin/config/development/xtd-mail-logger

@@ -1,0 +1,128 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for XTD Mail Logger module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function xtd_mail_logger_schema() {
+  $schema = array();
+
+  $schema['xtd_mail_logger'] = array(
+    'description' => 'Stores email log entries.',
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique log entry ID.',
+      ),
+      'timestamp' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Timestamp when the email was sent.',
+      ),
+      'status' => array(
+        'type' => 'varchar',
+        'length' => 4,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Email status: PASS or FAIL.',
+      ),
+      'failure_reason' => array(
+        'type' => 'text',
+        'not null' => FALSE,
+        'description' => 'Reason for email failure.',
+      ),
+      'subject' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Email subject.',
+      ),
+      'from_email' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'From email address.',
+      ),
+      'to_email' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'To email address.',
+      ),
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'timestamp' => array('timestamp'),
+      'status' => array('status'),
+    ),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function xtd_mail_logger_install() {
+  // Set default configuration
+  variable_set('xtd_mail_logger_database', FALSE);
+  variable_set('xtd_mail_logger_file', TRUE);
+  
+  // Ensure log directory exists
+  $log_dir = 'sites/default/files';
+  if (!file_exists($log_dir)) {
+    mkdir($log_dir, 0755, TRUE);
+  }
+  
+  drupal_set_message(t('XTD Mail Logger has been installed. Visit the <a href="@config">configuration page</a> to adjust settings.', 
+    array('@config' => url('admin/config/development/xtd-mail-logger'))));
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function xtd_mail_logger_uninstall() {
+  // Remove variables
+  variable_del('xtd_mail_logger_database');
+  variable_del('xtd_mail_logger_file');
+  
+  // Optionally remove log file
+  $log_file = 'sites/default/files/xtd_email_logger.log';
+  if (file_exists($log_file)) {
+    unlink($log_file);
+  }
+  
+  drupal_set_message(t('XTD Mail Logger has been uninstalled and all configuration removed.'));
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function xtd_mail_logger_requirements($phase) {
+  $requirements = array();
+  
+  if ($phase == 'runtime') {
+    $log_dir = 'sites/default/files';
+    $writable = is_writable($log_dir);
+    
+    $requirements['xtd_mail_logger_directory'] = array(
+      'title' => t('XTD Mail Logger directory'),
+      'value' => $writable ? t('Writable') : t('Not writable'),
+      'description' => t('The directory %dir must be writable for file logging to work.', array('%dir' => $log_dir)),
+      'severity' => $writable ? REQUIREMENT_OK : REQUIREMENT_WARNING,
+    );
+  }
+  
+  return $requirements;
+}
