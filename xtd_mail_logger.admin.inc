@@ -12,19 +12,12 @@ function xtd_mail_logger_admin_form($form, &$form_state) {
   $form['logging_options'] = array(
     '#type' => 'fieldset',
     '#title' => t('Logging Options'),
-    '#description' => t('Configure where email logs should be stored.'),
-  );
-  
-  $form['logging_options']['xtd_mail_logger_database'] = array(
-    '#type' => 'checkbox',
-    '#title' => t('Log to database'),
-    '#description' => t('Store email logs in the database for easy searching and filtering.'),
-    '#default_value' => variable_get('xtd_mail_logger_database', TRUE),
+    '#description' => t('Configure email logging settings.'),
   );
   
   $form['logging_options']['xtd_mail_logger_file'] = array(
     '#type' => 'checkbox',
-    '#title' => t('Log to file'),
+    '#title' => t('Enable email logging'),
     '#description' => t('Store email logs in a file: sites/default/files/xtd_email_logger.log'),
     '#default_value' => variable_get('xtd_mail_logger_file', TRUE),
   );
@@ -32,11 +25,32 @@ function xtd_mail_logger_admin_form($form, &$form_state) {
   $form['cleanup'] = array(
     '#type' => 'fieldset',
     '#title' => t('Log Cleanup'),
-    '#description' => t('Logs older than 7 days are automatically removed during cron runs.'),
+  );
+  
+  $form['cleanup']['xtd_mail_logger_retention_days'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Log retention period (days)'),
+    '#description' => t('Logs older than this number of days will be automatically removed during cron runs. Set to 0 to disable automatic cleanup.'),
+    '#default_value' => variable_get('xtd_mail_logger_retention_days', 3),
+    '#size' => 10,
+    '#maxlength' => 3,
+    '#required' => TRUE,
+  );
+  
+  $retention_days = variable_get('xtd_mail_logger_retention_days', 3);
+  $next_cron = variable_get('cron_last', 0) + 3600; // Estimate next cron run
+  
+  $form['cleanup']['info'] = array(
+    '#type' => 'item',
+    '#title' => t('Cleanup information'),
+    '#markup' => t('Current retention period: @days days<br>Next cleanup will run during the next cron execution.<br>Last cron run: @last_cron', 
+      array(
+        '@days' => $retention_days,
+        '@last_cron' => variable_get('cron_last', 0) ? format_date(variable_get('cron_last', 0), 'short') : t('Never'),
+      )),
   );
   
   // Show log statistics
-  $db_count = db_query('SELECT COUNT(*) FROM {xtd_mail_logger}')->fetchField();
   $file_lines = 0;
   $log_file = 'sites/default/files/xtd_email_logger.log';
   if (file_exists($log_file)) {
@@ -46,8 +60,11 @@ function xtd_mail_logger_admin_form($form, &$form_state) {
   $form['cleanup']['stats'] = array(
     '#type' => 'item',
     '#title' => t('Current log statistics'),
-    '#markup' => t('Database entries: @db_count<br>File log lines: @file_lines', 
-      array('@db_count' => number_format($db_count), '@file_lines' => number_format($file_lines))),
+    '#markup' => t('File log lines: @file_lines<br>File size: @file_size', 
+      array(
+        '@file_lines' => number_format($file_lines), 
+        '@file_size' => file_exists($log_file) ? format_size(filesize($log_file)) : '0 bytes'
+      )),
   );
   
   $form['cleanup']['clear_logs'] = array(
@@ -63,14 +80,14 @@ function xtd_mail_logger_admin_form($form, &$form_state) {
     '#type' => 'fieldset',
     '#title' => t('Integration Information'),
     '#description' => t('XTD Mail Logger automatically integrates with Drupal\'s mail system to log all outgoing emails.'),
-    '#collapsible' => TRUE,
-    '#collapsed' => TRUE,
+    '#collapsible' => FALSE,
+    '#collapsed' => FALSE,
   );
   
   $form['integration']['info'] = array(
     '#type' => 'item',
     '#markup' => t('This module logs both successful and failed emails sent through drupal_mail(). 
-      Logs include timestamp, status (PASS/FAIL), failure reason (if applicable), subject, from address, and to address.
+      Logs include timestamp, status (PASS/FAIL), module/key (email source), failure reason (if applicable), subject, from address, and to address.
       <br><br>View logs at: <a href="@logs_url">Administration » Reports » XTD Mail Logs</a>', 
       array('@logs_url' => url('admin/reports/xtd-mail-logs'))),
   );
@@ -82,11 +99,6 @@ function xtd_mail_logger_admin_form($form, &$form_state) {
  * Form validation handler for xtd_mail_logger_admin_form().
  */
 function xtd_mail_logger_admin_form_validate($form, &$form_state) {
-  // Ensure at least one logging method is enabled
-  if (!$form_state['values']['xtd_mail_logger_database'] && !$form_state['values']['xtd_mail_logger_file']) {
-    form_set_error('logging_options', t('At least one logging method must be enabled.'));
-  }
-  
   // Check if file logging directory is writable
   if ($form_state['values']['xtd_mail_logger_file']) {
     $log_dir = 'sites/default/files';
@@ -94,6 +106,15 @@ function xtd_mail_logger_admin_form_validate($form, &$form_state) {
       form_set_error('xtd_mail_logger_file', t('The directory %dir is not writable. File logging cannot be enabled.', 
         array('%dir' => $log_dir)));
     }
+  }
+  
+  // Validate retention days
+  $retention_days = $form_state['values']['xtd_mail_logger_retention_days'];
+  if (!is_numeric($retention_days) || $retention_days < 0) {
+    form_set_error('xtd_mail_logger_retention_days', t('Retention period must be a number greater than or equal to 0.'));
+  }
+  if ($retention_days > 365) {
+    form_set_error('xtd_mail_logger_retention_days', t('Retention period cannot be more than 365 days.'));
   }
 }
 

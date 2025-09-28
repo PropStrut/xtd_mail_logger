@@ -1,8 +1,8 @@
 name = XTD Mail Logger
-description = Logs successful and failed emails to database and files with configurable options.
+description = Logs successful and failed emails inside `drupal_mail()`
 package = Development
 core = 7.x
-version = 7.x-1.0
+version = 7.x-1.1
 
 files[] = xtd_mail_logger.module
 files[] = xtd_mail_logger.install

@@ -2,54 +2,15 @@
 
 /**
  * @file
- * Page callbacks for XTD Mail Logger module.
+ * Page callbacks for XTD Mail Logger module - File logging only.
  */
 
 /**
  * Main logs page callback.
  */
 function xtd_mail_logger_logs_page() {
-  // Redirect to database logs by default
-  drupal_goto('admin/reports/xtd-mail-logs/database');
-}
-
-/**
- * Database logs page callback.
- */
-function xtd_mail_logger_database_logs_page() {
-  $build = array();
-  
-  // Check if database logging is enabled
-  if (!variable_get('xtd_mail_logger_database', TRUE)) {
-    $build['disabled'] = array(
-      '#markup' => '<p>' . t('Database logging is currently disabled. Enable it in the <a href="@config">configuration</a>.', 
-        array('@config' => url('admin/config/development/xtd-mail-logger'))) . '</p>',
-    );
-    return $build;
-  }
-  
-  // Add filter form
-  $build['filter_form'] = drupal_get_form('xtd_mail_logger_filter_form', 'database');
-  
-  // Get filters from query parameters
-  $filters = array();
-  if (!empty($_GET['status'])) {
-    $filters['status'] = $_GET['status'];
-  }
-  if (!empty($_GET['from_date'])) {
-    $filters['from_date'] = $_GET['from_date'];
-  }
-  if (!empty($_GET['to_date'])) {
-    $filters['to_date'] = $_GET['to_date'];
-  }
-  if (!empty($_GET['search'])) {
-    $filters['search'] = $_GET['search'];
-  }
-  
-  // Build the logs table
-  $build['logs_table'] = xtd_mail_logger_build_database_table($filters);
-  
-  return $build;
+  // Go directly to file logs since we only have file logging now
+  return xtd_mail_logger_file_logs_page();
 }
 
 /**
@@ -68,7 +29,7 @@ function xtd_mail_logger_file_logs_page() {
   }
   
   // Add filter form
-  $build['filter_form'] = drupal_get_form('xtd_mail_logger_filter_form', 'file');
+  $build['filter_form'] = drupal_get_form('xtd_mail_logger_filter_form');
   
   // Get filters from query parameters
   $filters = array();
@@ -94,7 +55,7 @@ function xtd_mail_logger_file_logs_page() {
 /**
  * Filter form for log pages.
  */
-function xtd_mail_logger_filter_form($form, &$form_state, $type) {
+function xtd_mail_logger_filter_form($form, &$form_state) {
   $form['filters'] = array(
     '#type' => 'fieldset',
     '#title' => t('Filter logs'),
@@ -137,7 +98,7 @@ function xtd_mail_logger_filter_form($form, &$form_state, $type) {
   $form['filters']['search'] = array(
     '#type' => 'textfield',
     '#title' => t('Search'),
-    '#description' => t('Search in subject, from, to, or failure reason'),
+    '#description' => t('Search in module/key, subject, from, to, or failure reason'),
     '#default_value' => isset($_GET['search']) ? $_GET['search'] : '',
     '#size' => 30,
   );
@@ -223,107 +184,6 @@ function xtd_mail_logger_filter_form_reset($form, &$form_state) {
 }
 
 /**
- * Build database logs table.
- */
-function xtd_mail_logger_build_database_table($filters = array()) {
-  $header = array(
-    array('data' => t('Timestamp'), 'field' => 'timestamp', 'sort' => 'desc'),
-    array('data' => t('Status'), 'field' => 'status'),
-    array('data' => t('Subject'), 'field' => 'subject'),
-    array('data' => t('From'), 'field' => 'from_email'),
-    array('data' => t('To'), 'field' => 'to_email'),
-    array('data' => t('Failure Reason'), 'field' => 'failure_reason'),
-  );
-  
-  $query = db_select('xtd_mail_logger', 'xml');
-  $query->fields('xml');
-  
-  // Apply filters
-  if (!empty($filters['status'])) {
-    $query->condition('status', $filters['status']);
-  }
-  
-  if (!empty($filters['from_date'])) {
-    $from_timestamp = strtotime($filters['from_date'] . ' 00:00:00');
-    if ($from_timestamp) {
-      $query->condition('timestamp', $from_timestamp, '>=');
-    }
-  }
-  
-  if (!empty($filters['to_date'])) {
-    $to_timestamp = strtotime($filters['to_date'] . ' 23:59:59');
-    if ($to_timestamp) {
-      $query->condition('timestamp', $to_timestamp, '<=');
-    }
-  }
-  
-  if (!empty($filters['search'])) {
-    $or = db_or();
-    $or->condition('subject', '%' . db_like($filters['search']) . '%', 'LIKE');
-    $or->condition('from_email', '%' . db_like($filters['search']) . '%', 'LIKE');
-    $or->condition('to_email', '%' . db_like($filters['search']) . '%', 'LIKE');
-    $or->condition('failure_reason', '%' . db_like($filters['search']) . '%', 'LIKE');
-    $query->condition($or);
-  }
-  
-  $query = $query->extend('PagerDefault')->limit(50);
-  $query = $query->extend('TableSort')->orderByHeader($header);
-  
-  $result = $query->execute();
-  
-  $rows = array();
-  foreach ($result as $log) {
-    $status_class = $log->status == 'PASS' ? 'status-pass' : 'status-fail';
-    
-    $rows[] = array(
-      'data' => array(
-        format_date($log->timestamp, 'short'),
-        array('data' => $log->status, 'class' => array($status_class)),
-        array('data' => check_plain($log->subject), 'style' => 'max-width: 200px; word-wrap: break-word;'),
-        check_plain($log->from_email),
-        check_plain($log->to_email),
-        array('data' => check_plain($log->failure_reason), 'style' => 'max-width: 300px; word-wrap: break-word;'),
-      ),
-    );
-  }
-  
-  $build = array();
-  
-  if (empty($rows)) {
-    $build['empty'] = array(
-      '#markup' => '<p>' . t('No log entries found matching the current filters.') . '</p>',
-    );
-  } else {
-    // Add summary
-    $total_count = db_query('SELECT COUNT(*) FROM {xtd_mail_logger}')->fetchField();
-    $filtered_count = count($rows);
-    
-    $build['summary'] = array(
-      '#markup' => '<div class="xtd-mail-logger-summary">' . 
-        t('Showing @filtered entries (@total total in database)', 
-          array('@filtered' => $filtered_count, '@total' => number_format($total_count))) . 
-        '</div>',
-    );
-    
-    $build['table'] = array(
-      '#theme' => 'table',
-      '#header' => $header,
-      '#rows' => $rows,
-      '#attributes' => array('class' => array('xtd-mail-logger-table')),
-    );
-    
-    $build['pager'] = array(
-      '#theme' => 'pager',
-    );
-  }
-  
-  // Add CSS
-  drupal_add_css(drupal_get_path('module', 'xtd_mail_logger') . '/xtd_mail_logger.css');
-  
-  return $build;
-}
-
-/**
  * Build file logs display.
  */
 function xtd_mail_logger_build_file_display($filters = array()) {
@@ -356,11 +216,8 @@ function xtd_mail_logger_build_file_display($filters = array()) {
       continue;
     }
     
-    // Debug: Let's be more flexible with the regex and add some debugging
-    // The format should be: [YYYY-MM-DD HH:MM:SS] STATUS | Subject: ... | From: ... | To: ... | Reason: ...
-    
-    // First, let's try a more flexible pattern
-    if (preg_match('/^\[([^\]]+)\]\s+(\w+)\s*\|\s*Subject:\s*(.*?)\s*\|\s*From:\s*(.*?)\s*\|\s*To:\s*(.*?)\s*\|\s*Reason:\s*(.*)$/', $line, $matches)) {
+    // Parse the log format: [YYYY-MM-DD HH:MM:SS] STATUS | Module: module/key | Subject: ... | From: ... | To: ... | Reason: ...
+    if (preg_match('/^\[([^\]]+)\]\s+(\w+)\s*\|\s*Module:\s*([^|]*?)\s*\|\s*Subject:\s*(.*?)\s*\|\s*From:\s*(.*?)\s*\|\s*To:\s*(.*?)\s*\|\s*Reason:\s*(.*)$/', $line, $matches)) {
       $timestamp = strtotime($matches[1]);
       
       // Skip if we can't parse the timestamp
@@ -371,10 +228,11 @@ function xtd_mail_logger_build_file_display($filters = array()) {
       $log = array(
         'timestamp' => $timestamp,
         'status' => trim($matches[2]),
-        'subject' => trim($matches[3]),
-        'from_email' => trim($matches[4]),
-        'to_email' => trim($matches[5]),
-        'failure_reason' => trim($matches[6]),
+        'module_key' => trim($matches[3]),
+        'subject' => trim($matches[4]),
+        'from_email' => trim($matches[5]),
+        'to_email' => trim($matches[6]),
+        'failure_reason' => trim($matches[7]),
         'raw_line' => $line,
         'line_number' => $line_number + 1,
       );
@@ -403,6 +261,7 @@ function xtd_mail_logger_build_file_display($filters = array()) {
       if ($include && !empty($filters['search'])) {
         $search_text = strtolower($filters['search']);
         $log_text = strtolower(implode(' ', array(
+          isset($log['module_key']) ? $log['module_key'] : '',
           $log['subject'], 
           $log['from_email'], 
           $log['to_email'], 
@@ -451,6 +310,7 @@ function xtd_mail_logger_build_file_display($filters = array()) {
     t('Line #'),
     t('Timestamp'),
     t('Status'),
+    t('Module/Key'),
     t('Subject'),
     t('From'),
     t('To'),
@@ -466,6 +326,7 @@ function xtd_mail_logger_build_file_display($filters = array()) {
         $log['line_number'],
         format_date($log['timestamp'], 'short'),
         array('data' => $log['status'], 'class' => array($status_class)),
+        check_plain(isset($log['module_key']) ? $log['module_key'] : 'unknown'),
         array('data' => check_plain($log['subject']), 'style' => 'max-width: 200px; word-wrap: break-word;'),
         check_plain($log['from_email']),
         check_plain($log['to_email']),

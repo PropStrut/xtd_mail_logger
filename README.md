@@ -1,18 +1,14 @@
 # XTD Mail Logger
 
-A Drupal 7 module that logs all outgoing emails (both successful and failed) to database and/or files with configurable options and a management interface.
+A lightweight Drupal 7 module that logs all outgoing emails (both successful and failed) to files with detailed error information and email source tracking.
 
-Note that database logging is untested! The file logging is working well for us.
-
-By Brian Reed using Claude.ai (9/13/2025)
-
-## Files
+## Files Created
 
 The module consists of the following files:
 
 1. **xtd_mail_logger.info** - Module definition file
 2. **xtd_mail_logger.module** - Main module with hooks and logging functions
-3. **xtd_mail_logger.install** - Database schema and install/uninstall hooks
+3. **xtd_mail_logger.install** - Install/uninstall hooks and system requirements
 4. **xtd_mail_logger.admin.inc** - Configuration form
 5. **xtd_mail_logger.pages.inc** - Log viewing pages with filtering
 6. **xtd_mail_logger.css** - Styling for the log tables
@@ -20,18 +16,17 @@ The module consists of the following files:
 
 ## Key Features
 
-✅ **Drupal Integration**: Automatically hooks into Drupal's `drupal_mail()` system via `hook_mail_alter()`  
-✅ **Dual Logging Options**: Configurable logging to both database and file (`sites/default/files/xtd_email_logger.log`)  
-✅ **Complete Email Data**: Logs timestamp, PASS/FAIL status, failure reason, subject, from address, and to address  
-✅ **Configuration Page**: Easy-to-use admin interface at Admin → Configuration → Development → XTD Mail Logger  
-✅ **Separate Log Views**: Database logs and file logs displayed in separate tabs for better organization  
+✅ **Automatic Integration**: Seamlessly hooks into Drupal's `drupal_mail()` system  
+✅ **File-Based Logging**: Reliable logging to `sites/default/files/xtd_mail_logger.log`  
+✅ **Email Source Tracking**: Shows which module/key sent each email (e.g., `user/register_admin_created`, `rules/ticket_notification`)  
+✅ **Detailed Error Information**: Captures specific failure reasons instead of generic errors (when possible) 
+✅ **Pattern Recognition**: Easy identification of which email types are failing  
 ✅ **Advanced Filtering**: Filter logs by status (PASS/FAIL), date range, and search across all fields  
-✅ **Table Sorting**: Sortable columns with pagination support  
-✅ **Automatic Cleanup**: Cron job automatically removes logs older than 7 days  
-✅ **Manual Cleanup**: "Clear All Logs" button on configuration page for immediate cleanup  
-✅ **Proper Permissions**: Granular permissions for administration and log viewing  
-✅ **Log Statistics**: Real-time display of current log counts on configuration page  
-✅ **Error Handling**: Validates configuration settings and checks directory permissions
+✅ **Configurable Retention**: Auto-cleanup with customizable retention period (default 3 days)  
+✅ **Lightweight**: No database overhead - file-only logging for maximum reliability  
+✅ **User-Friendly Interface**: Clean admin interface with sorting, filtering, and pagination  
+✅ **Manual Cleanup**: "Clear All Logs" button for immediate cleanup  
+✅ **System Integration**: Proper Drupal permissions and status report integration
 
 ## Installation Instructions
 
@@ -55,90 +50,158 @@ The module consists of the following files:
 
 ### Step 4: Configure the Module
 1. Navigate to **Admin → Configuration → Development → XTD Mail Logger** (`admin/config/development/xtd-mail-logger`)
-2. Choose your logging preferences:
-   - **Log to database**: Store logs in the database for easy searching and filtering
-   - **Log to file**: Store logs in `sites/default/files/xtd_email_logger.log`
-3. View current log statistics
-4. Save configuration
+2. Configure your settings:
+   - **Enable email logging**: Turn logging on/off
+   - **Log retention period**: Set how many days to keep logs (0 = forever)
+3. View current log statistics and file information
+4. Use "Clear all logs" button if needed
+5. Save configuration
 
 ### Step 5: View Logs
 1. Navigate to **Admin → Reports → XTD Mail Logs** (`admin/reports/xtd-mail-logs`)
-2. Use the tabs to switch between:
-   - **Database Logs**: Searchable, sortable database entries
-   - **File Logs**: Raw log file entries with filtering
+2. Use the filtering options to find specific logs:
+   - **Filter by status**: Show only PASS or FAIL entries
+   - **Date range**: Filter by specific date ranges
+   - **Search**: Find logs containing specific text in any field
 
 ## Usage
 
 ### Automatic Logging
 Once installed and enabled, the module automatically logs all emails sent through Drupal's `drupal_mail()` function. No additional configuration is required for basic logging functionality.
 
+### Understanding Log Entries
+Each log entry contains:
+- **Timestamp**: When the email was sent
+- **Status**: PASS (successful) or FAIL (failed)
+- **Module/Key**: Which Drupal module and email type sent it
+- **Subject**: The email subject line
+- **From**: Sender email address
+- **To**: Recipient email address
+- **Failure Reason**: Specific error details for failed emails (empty for successful emails)
+
+### Common Module/Key Patterns
+- `user/register_admin_created` - New user welcome emails
+- `user/password_reset` - Password reset emails
+- `rules/[rule_name]` - Emails sent by Rules module
+- `contact/page_mail` - Contact form emails
+- `system/[various]` - System-generated emails
+
 ### Log Management
-- **Automatic Cleanup**: Logs older than 7 days are automatically removed during cron runs
-- **Manual Cleanup**: Use the "Clear all logs" button on the configuration page to immediately remove all logs
-- **Log Statistics**: View current log counts on the configuration page
+- **Automatic Cleanup**: Logs older than the configured retention period are automatically removed during cron runs
+- **Manual Cleanup**: Use the "Clear all logs" button in configuration to immediately remove all logs
+- **Log Statistics**: View current log counts and file size in the configuration page
 
 ### Filtering and Search
-On both database and file log pages, you can:
-- Filter by email status (PASS/FAIL)
-- Filter by date range (from/to dates)
-- Search across subject, from address, to address, and failure reason fields
-- Sort by any column (database logs only)
-- Navigate through paginated results
+- **Status Filter**: Show only successful (PASS) or failed (FAIL) emails
+- **Date Range**: Filter by from/to dates (YYYY-MM-DD format)
+- **Search**: Find logs containing specific text in:
+  - Module/Key (e.g., search "user" to find all user-related emails)
+  - Subject line
+  - From/To email addresses
+  - Failure reasons
+
+### Troubleshooting Email Issues
+1. **Identify Patterns**: Look at the Module/Key column to see which types of emails are failing
+2. **Check Failure Reasons**: Read the specific error messages in the Failure Reason column
+3. **Search for Specific Issues**: Use the search box to find emails with specific error patterns
+4. **Monitor Over Time**: Use date filters to see if issues are recent or ongoing
 
 ## Technical Details
-
-### Database Schema
-The module creates a `xtd_mail_logger` table with the following fields:
-- `id`: Primary key (serial)
-- `timestamp`: Unix timestamp of when email was sent
-- `status`: Email status (PASS or FAIL)
-- `failure_reason`: Reason for failure (if applicable)
-- `subject`: Email subject line
-- `from_email`: Sender email address
-- `to_email`: Recipient email address
 
 ### File Logging Format
 Log entries in the file follow this format:
 ```
-[YYYY-MM-DD HH:MM:SS] STATUS | Subject: SUBJECT | From: FROM_EMAIL | To: TO_EMAIL | Reason: FAILURE_REASON
+[YYYY-MM-DD HH:MM:SS] STATUS | Module: module/key | Subject: SUBJECT | From: FROM_EMAIL | To: TO_EMAIL | Reason: FAILURE_REASON
+```
+
+Example:
+```
+[2024-01-15 14:30:25] FAIL | Module: rules/ticket_notification | Subject: New Ticket #1234 | From: noreply@example.com | To: user@example.com | Reason: SMTP connection failed
 ```
 
 ### Cron Integration
-The module integrates with Drupal's cron system to automatically clean up old logs. The cleanup process:
+The module integrates with Drupal's cron system to automatically clean up old logs:
 - Runs during each cron execution
-- Removes database entries older than 7 days
-- Removes file log entries older than 7 days
-- Can be triggered manually via Drupal's cron interface
+- Removes log entries older than the configured retention period
+- Can be disabled by setting retention period to 0
+- Manual cleanup always available via configuration page
+
+### Error Detection
+The module captures various types of email failures:
+- PHP mail() function errors
+- SMTP connection issues
+- Invalid email addresses
+- Missing required fields
+- Server configuration problems
+- Mail server response errors
+
+### System Requirements
+- Drupal 7.x
+- Writable files directory (`sites/default/files/`)
+- PHP with file system write permissions
+- Cron configured for automatic log cleanup (optional)
+
+## File Structure and Permissions
+
+### Required Directories
+- `sites/default/files/` - Must be writable by the web server
+
+### Log File Location
+- `sites/default/files/xtd_mail_logger.log` - Created automatically when first email is sent
+
+### Permissions
+The module checks directory permissions and displays warnings in the Drupal status report if issues are detected.
 
 ## Troubleshooting
 
 ### Common Issues
 
-**File logging not working:**
-- Ensure `sites/default/files/` directory is writable by the web server
-- Check the Status Report at Admin → Reports → Status report for file system warnings
-
-**No emails being logged:**
+**Emails not being logged:**
 - Verify the module is enabled
-- Ensure emails are being sent through `drupal_mail()` function
-- Check if logging is enabled in the module configuration
+- Check that `sites/default/files/` is writable
+- Ensure emails are sent through `drupal_mail()` function
+- Check module configuration is enabled
 
-**Permission denied errors:**
-- Verify user has appropriate permissions assigned
-- Check that the module's permissions are properly configured
+**Log file not created:**
+- Verify directory permissions on `sites/default/files/`
+- Check Drupal status report for warnings
+- Try sending a test email
 
-### Support
-For issues specific to this module, check:
-1. Drupal's watchdog logs at Admin → Reports → Recent log messages
-2. Web server error logs
-3. The module's configuration page for status indicators
+**Log viewing page shows errors:**
+- Clear Drupal caches
+- Check file permissions
+- Verify log file format is correct
 
-## Requirements
+### Status Report Integration
+Check **Admin → Reports → Status report** for:
+- Directory writability warnings
+- Module configuration status  
+- Log file statistics and information
 
-- Drupal 7.x
-- MySQL or MariaDB database
-- Writable files directory (`sites/default/files/`)
-- PHP with file system write permissions
+### Getting Help
+1. Check Drupal's watchdog logs at **Admin → Reports → Recent log messages**
+2. Verify file permissions and directory access
+3. Review the module's status in the Drupal status report
+4. Check the configuration page for any error messages
+
+## Benefits
+
+### For Site Administrators
+- **Quick Problem Identification**: Instantly see which emails are failing and why
+- **Pattern Recognition**: Identify systematic issues affecting specific email types
+- **Minimal Performance Impact**: File-based logging with no database overhead
+- **Easy Maintenance**: Automated cleanup with configurable retention
+
+### For Developers
+- **Debugging Tool**: Detailed error messages help identify code issues
+- **Integration Testing**: Verify email functionality across different modules
+- **Performance Monitoring**: Track email system reliability over time
+- **Module Identification**: See exactly which modules are sending emails
+
+### For Users
+- **Reliable Email Delivery**: Helps administrators ensure emails reach users
+- **Issue Resolution**: Problems can be identified and fixed quickly
+- **Transparency**: Clear logging of all email activity
 
 ## License
 

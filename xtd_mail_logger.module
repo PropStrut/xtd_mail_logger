@@ -2,7 +2,7 @@
 
 /**
  * @file
- * XTD Mail Logger module - Logs successful and failed emails.
+ * XTD Mail Logger module - Logs successful and failed emails to file.
  */
 
 /**
@@ -46,24 +46,6 @@ function xtd_mail_logger_menu() {
     'type' => MENU_NORMAL_ITEM,
   );
 
-  $items['admin/reports/xtd-mail-logs/database'] = array(
-    'title' => 'Database Logs',
-    'page callback' => 'xtd_mail_logger_database_logs_page',
-    'access arguments' => array('view xtd mail logs'),
-    'file' => 'xtd_mail_logger.pages.inc',
-    'type' => MENU_DEFAULT_LOCAL_TASK,
-    'weight' => 0,
-  );
-
-  $items['admin/reports/xtd-mail-logs/file'] = array(
-    'title' => 'File Logs',
-    'page callback' => 'xtd_mail_logger_file_logs_page',
-    'access arguments' => array('view xtd mail logs'),
-    'file' => 'xtd_mail_logger.pages.inc',
-    'type' => MENU_LOCAL_TASK,
-    'weight' => 1,
-  );
-
   return $items;
 }
 
@@ -89,8 +71,46 @@ function xtd_mail_logger_drupal_mail_send_alter(&$mailkey, &$message, $params) {
 class XTDMailLoggerSystem extends DefaultMailSystem {
   
   public function mail(array $message) {
-    // Send using parent class
-    $result = parent::mail($message);
+    // Clear any previous errors
+    error_clear_last();
+    
+    // Capture current error handler to restore later
+    $old_error_handler = set_error_handler(function($errno, $errstr, $errfile, $errline) {
+      // Store error info in the message array for our logger
+      global $xtd_mail_last_error;
+      $xtd_mail_last_error = array(
+        'errno' => $errno,
+        'errstr' => $errstr,
+        'errfile' => $errfile,
+        'errline' => $errline,
+        'timestamp' => time(),
+      );
+      return FALSE; // Let PHP handle the error normally too
+    });
+    
+    try {
+      // Send using parent class
+      $result = parent::mail($message);
+      
+      // If sending failed, try to get more specific error info
+      if (!$result) {
+        global $xtd_mail_last_error;
+        if (isset($xtd_mail_last_error)) {
+          $message['#xtd_error'] = $xtd_mail_last_error['errstr'];
+        }
+      }
+      
+    } catch (Exception $e) {
+      $result = FALSE;
+      $message['#xtd_error'] = $e->getMessage();
+    }
+    
+    // Restore original error handler
+    if ($old_error_handler) {
+      set_error_handler($old_error_handler);
+    } else {
+      restore_error_handler();
+    }
     
     // Log the result
     xtd_mail_logger_log_email($message, $result);
@@ -114,13 +134,11 @@ function xtd_mail_logger_init() {
 }
 
 /**
- * Log email to database and/or file.
+ * Log email to file only.
  */
 function xtd_mail_logger_log_email($message, $result) {
-  $log_to_database = variable_get('xtd_mail_logger_database', TRUE);
-  $log_to_file = variable_get('xtd_mail_logger_file', TRUE);
-  
-  if (!$log_to_database && !$log_to_file) {
+  // Only log to file now
+  if (!variable_get('xtd_mail_logger_file', TRUE)) {
     return;
   }
   
@@ -128,13 +146,49 @@ function xtd_mail_logger_log_email($message, $result) {
   $failure_reason = '';
   
   if (!$result) {
-    // Try to get failure reason from error log or last error
+    // Try multiple methods to get failure reason
+    $failure_reason = 'Mail send failed';
+    
+    // Method 1: Check for recent PHP errors
     $error = error_get_last();
-    if ($error && strpos($error['message'], 'mail') !== FALSE) {
+    if ($error && (
+        stripos($error['message'], 'mail') !== FALSE || 
+        stripos($error['message'], 'smtp') !== FALSE ||
+        stripos($error['message'], 'sendmail') !== FALSE ||
+        time() - $error['timestamp'] < 5 // Recent error within 5 seconds
+    )) {
       $failure_reason = $error['message'];
-    } else {
-      $failure_reason = 'Mail send failed - reason unknown';
     }
+    
+    // Method 2: Check if we have additional error info in the message array
+    if (isset($message['#xtd_error'])) {
+      $failure_reason = $message['#xtd_error'];
+    }
+    
+    // Method 3: Check common mail configuration issues
+    if ($failure_reason == 'Mail send failed') {
+      $mail_system = variable_get('mail_system', array());
+      if (empty($mail_system) || !isset($mail_system['default-system'])) {
+        $failure_reason = 'Mail system not configured';
+      } else {
+        // Try to give more specific reasons based on common issues
+        if (!function_exists('mail')) {
+          $failure_reason = 'PHP mail() function not available';
+        } elseif (empty($message['to'])) {
+          $failure_reason = 'No recipient specified';
+        } elseif (empty($message['from'])) {
+          $failure_reason = 'No sender specified';
+        } else {
+          $failure_reason = 'Mail send failed - check server mail configuration';
+        }
+      }
+    }
+  }
+  
+  // Get module/key information for tracking email source
+  $module_key = 'unknown';
+  if (isset($message['module']) && isset($message['key'])) {
+    $module_key = $message['module'] . '/' . $message['key'];
   }
   
   $log_data = array(
@@ -144,19 +198,11 @@ function xtd_mail_logger_log_email($message, $result) {
     'subject' => isset($message['subject']) ? $message['subject'] : '',
     'from_email' => isset($message['from']) ? $message['from'] : '',
     'to_email' => isset($message['to']) ? $message['to'] : '',
+    'module_key' => $module_key,
   );
   
-  // Log to database
-  if ($log_to_database) {
-    db_insert('xtd_mail_logger')
-      ->fields($log_data)
-      ->execute();
-  }
-  
   // Log to file
-  if ($log_to_file) {
-    xtd_mail_logger_write_to_file($log_data);
-  }
+  xtd_mail_logger_write_to_file($log_data);
 }
 
 /**
@@ -173,9 +219,10 @@ function xtd_mail_logger_write_to_file($log_data) {
   
   $timestamp = date('Y-m-d H:i:s', $log_data['timestamp']);
   $log_line = sprintf(
-    "[%s] %s | Subject: %s | From: %s | To: %s | Reason: %s\n",
+    "[%s] %s | Module: %s | Subject: %s | From: %s | To: %s | Reason: %s\n",
     $timestamp,
     $log_data['status'],
+    $log_data['module_key'],
     $log_data['subject'],
     $log_data['from_email'],
     $log_data['to_email'],
@@ -189,54 +236,68 @@ function xtd_mail_logger_write_to_file($log_data) {
  * Implements hook_cron().
  */
 function xtd_mail_logger_cron() {
-  // Clean up old database logs (older than 3 days)
-  $cutoff = REQUEST_TIME - (7 * 24 * 60 * 60);
+  $retention_days = variable_get('xtd_mail_logger_retention_days', 3);
   
-  if (variable_get('xtd_mail_logger_database', TRUE)) {
-    db_delete('xtd_mail_logger')
-      ->condition('timestamp', $cutoff, '<')
-      ->execute();
+  // Skip cleanup if retention is set to 0 (disabled)
+  if ($retention_days <= 0) {
+    return;
   }
   
   // Clean up old file logs
   if (variable_get('xtd_mail_logger_file', TRUE)) {
-    xtd_mail_logger_cleanup_file_logs();
+    xtd_mail_logger_cleanup_file_logs($retention_days);
   }
 }
 
 /**
  * Clean up old file logs.
  */
-function xtd_mail_logger_cleanup_file_logs() {
+function xtd_mail_logger_cleanup_file_logs($retention_days = NULL) {
+  if ($retention_days === NULL) {
+    $retention_days = variable_get('xtd_mail_logger_retention_days', 3);
+  }
+  
+  // Skip cleanup if retention is disabled
+  if ($retention_days <= 0) {
+    return;
+  }
+  
   $log_file = 'sites/default/files/xtd_email_logger.log';
   
   if (!file_exists($log_file)) {
     return;
   }
   
-  $cutoff = REQUEST_TIME - (7 * 24 * 60 * 60);
+  $cutoff = REQUEST_TIME - ($retention_days * 24 * 60 * 60);
   $lines = file($log_file, FILE_IGNORE_NEW_LINES);
   $new_lines = array();
+  $removed_count = 0;
   
   foreach ($lines as $line) {
     if (preg_match('/^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $line, $matches)) {
       $log_timestamp = strtotime($matches[1]);
       if ($log_timestamp >= $cutoff) {
         $new_lines[] = $line;
+      } else {
+        $removed_count++;
       }
+    } else {
+      // Keep lines that don't match the expected format
+      $new_lines[] = $line;
     }
   }
   
-  file_put_contents($log_file, implode("\n", $new_lines) . "\n");
+  if ($removed_count > 0) {
+    file_put_contents($log_file, implode("\n", $new_lines) . "\n");
+    watchdog('xtd_mail_logger', 'Cleaned up @count old file log entries (older than @days days).', 
+      array('@count' => $removed_count, '@days' => $retention_days), WATCHDOG_INFO);
+  }
 }
 
 /**
  * Clear all logs.
  */
 function xtd_mail_logger_clear_all_logs() {
-  // Clear database logs
-  db_truncate('xtd_mail_logger')->execute();
-  
   // Clear file logs
   $log_file = 'sites/default/files/xtd_email_logger.log';
   if (file_exists($log_file)) {
