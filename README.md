@@ -2,7 +2,9 @@
 
 A lightweight Drupal 7 module that logs all outgoing emails (both successful and failed) to files with detailed error information and email source tracking.
 
-## Files Created
+By Brian Reed using Claude.ai (September 2025)
+
+## Module Files
 
 The module consists of the following files:
 
@@ -19,7 +21,7 @@ The module consists of the following files:
 ✅ **Automatic Integration**: Seamlessly hooks into Drupal's `drupal_mail()` system  
 ✅ **File-Based Logging**: Reliable logging to `sites/default/files/xtd_mail_logger.log`  
 ✅ **Email Source Tracking**: Shows which module/key sent each email (e.g., `user/register_admin_created`, `rules/ticket_notification`)  
-✅ **Detailed Error Information**: Captures specific failure reasons instead of generic errors (when possible) 
+✅ **Detailed Error Information**: Captures specific failure reasons instead of generic errors (when possible)  
 ✅ **Pattern Recognition**: Easy identification of which email types are failing  
 ✅ **Advanced Filtering**: Filter logs by status (PASS/FAIL), date range, and search across all fields  
 ✅ **Configurable Retention**: Auto-cleanup with customizable retention period (default 3 days)  
